@@ -1,0 +1,10 @@
+[project]
+name = "rrlyrae-fourier"
+version = "0.1.0"
+description = "Ajustement de courbes de lumiere RR Lyrae par serie de Fourier."
+requires-python = ">=3.10"
+dependencies = [
+    "astropy>=6.0",
+    "matplotlib>=3.8",
+    "numpy>=2.0",
+]
