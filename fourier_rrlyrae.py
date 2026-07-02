@@ -112,6 +112,66 @@ def epoch_of_maximum_light(
     return float(jd[brightest_index])
 
 
+def epoch_from_local_polynomial(
+    jd: np.ndarray,
+    mag: np.ndarray,
+    err: np.ndarray,
+    period: float,
+    reference_epoch: float,
+    window_phase: float = 0.08,
+) -> float:
+    """Estimate maximum-light T0 from measurements with a local quadratic fit."""
+    dt = ((jd - reference_epoch + 0.5 * period) % period) - 0.5 * period
+    half_window_days = window_phase * period
+    in_window = np.abs(dt) <= half_window_days
+
+    if np.count_nonzero(in_window) < 5:
+        brightest_index = int(np.argmin(mag))
+        observed_epoch = float(jd[brightest_index])
+        cycles_to_reference = np.rint((reference_epoch - observed_epoch) / period)
+        return float(observed_epoch + cycles_to_reference * period)
+
+    x = dt[in_window]
+    y = mag[in_window]
+    sigma = err[in_window]
+
+    x_scale = half_window_days if half_window_days > 0 else period
+    x_scaled = x / x_scale
+    design = np.column_stack([np.ones_like(x_scaled), x_scaled, x_scaled**2])
+    weighted_design = design / sigma[:, None]
+    weighted_mag = y / sigma
+    coeffs, *_ = np.linalg.lstsq(weighted_design, weighted_mag, rcond=None)
+
+    curvature = coeffs[2]
+    if curvature <= 0:
+        return reference_epoch
+
+    vertex_scaled = -coeffs[1] / (2.0 * curvature)
+    if abs(vertex_scaled) > 1.0:
+        return reference_epoch
+
+    return float(reference_epoch + vertex_scaled * x_scale)
+
+
+def automatic_epoch(
+    jd: np.ndarray,
+    mag: np.ndarray,
+    err: np.ndarray,
+    period: float,
+    order: int,
+    epoch_method: str,
+) -> float:
+    initial_epoch = float(np.min(jd))
+    initial_coeffs, *_ = solve_weighted_fourier(jd, mag, err, period, order, initial_epoch)
+
+    if epoch_method == "model":
+        return epoch_of_maximum_light(initial_coeffs, period, initial_epoch)
+    if epoch_method == "local-poly":
+        model_epoch = epoch_of_maximum_light(initial_coeffs, period, initial_epoch)
+        return epoch_from_local_polynomial(jd, mag, err, period, model_epoch)
+    raise ValueError(f"epoch_method inconnu: {epoch_method}")
+
+
 def fit_fourier_series(
     jd: np.ndarray,
     mag: np.ndarray,
@@ -119,12 +179,12 @@ def fit_fourier_series(
     period: float,
     order: int,
     epoch: float | None = None,
-) -> dict[str, np.ndarray | float | int]:
+    epoch_method: str = "local-poly",
+) -> dict[str, object]:
     """Weighted least-squares Fourier fit for a known period."""
+    epoch_was_manual = epoch is not None
     if epoch is None:
-        initial_epoch = float(np.min(jd))
-        initial_coeffs, *_ = solve_weighted_fourier(jd, mag, err, period, order, initial_epoch)
-        epoch = epoch_of_maximum_light(initial_coeffs, period, initial_epoch)
+        epoch = automatic_epoch(jd, mag, err, period, order, epoch_method)
 
     coeffs, model, residuals, chi2, reduced_chi2 = solve_weighted_fourier(
         jd, mag, err, period, order, float(epoch)
@@ -142,6 +202,7 @@ def fit_fourier_series(
         "period": period,
         "order": order,
         "epoch": float(epoch),
+        "epoch_method": "manual" if epoch_was_manual else epoch_method,
         "coeffs": coeffs,
         "model": model,
         "residuals": residuals,
@@ -171,7 +232,7 @@ def format_duration_days(days: float, decimals: int = 10) -> str:
 
 
 def light_curve_shape_parameters(
-    fit: dict[str, np.ndarray | float | int],
+    fit: dict[str, object],
     samples: int = 20000,
 ) -> dict[str, float]:
     """Estimate amplitude and rising-branch duration from the fitted curve."""
@@ -200,7 +261,7 @@ def light_curve_shape_parameters(
     }
 
 
-def print_fit_summary(fit: dict[str, np.ndarray | float | int]) -> None:
+def print_fit_summary(fit: dict[str, object]) -> None:
     coeffs = np.asarray(fit["coeffs"])
     amplitudes = np.asarray(fit["harmonic_amplitudes"])
     phases = np.asarray(fit["harmonic_phases"])
@@ -208,6 +269,7 @@ def print_fit_summary(fit: dict[str, np.ndarray | float | int]) -> None:
 
     print(f"Periode: {format_duration_days(float(fit['period']))}")
     print(f"Epoque t0: {fit['epoch']:.8f} JD")
+    print(f"Methode t0: {fit['epoch_method']}")
     print(f"Ordre Fourier: {order}")
     print(f"Magnitude moyenne A0: {coeffs[0]:.6f}")
     print(f"Chi2 reduit: {fit['reduced_chi2']:.4f}")
@@ -254,7 +316,7 @@ def plot_folded_light_curve(
     jd: np.ndarray,
     mag: np.ndarray,
     err: np.ndarray,
-    fit: dict[str, np.ndarray | float | int],
+    fit: dict[str, object],
     output_path: Path,
     show: bool = False,
     labels: np.ndarray | None = None,
@@ -352,7 +414,13 @@ def main() -> None:
         "--epoch",
         type=float,
         default=None,
-        help="Epoque t0 en JD. Defaut: maximum de lumiere du modele.",
+        help="Epoque t0 en JD. Si fourni, cette valeur est prioritaire.",
+    )
+    parser.add_argument(
+        "--epoch-method",
+        choices=("local-poly", "model"),
+        default="local-poly",
+        help="Methode automatique pour t0 si --epoch est absent. Defaut: local-poly.",
     )
     parser.add_argument(
         "--data",
@@ -394,7 +462,15 @@ def main() -> None:
         raise SystemExit(f"Aucun fichier trouve: {args.data / args.pattern}")
 
     jd, mag, err, labels = read_light_curve_with_labels(paths, args.label_mode)
-    fit = fit_fourier_series(jd, mag, err, args.period, args.order, args.epoch)
+    fit = fit_fourier_series(
+        jd,
+        mag,
+        err,
+        args.period,
+        args.order,
+        args.epoch,
+        args.epoch_method,
+    )
     print_fit_summary(fit)
     plot_folded_light_curve(
         jd,

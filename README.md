@@ -77,9 +77,15 @@ phi31 = phi3 - 3*phi1
 Les phases composees sont ramenees dans l'intervalle `[0, 2*pi[`.
 
 Par convention pour les RR Lyrae, l'epoque `T0` est prise au maximum de
-lumiere, c'est-a-dire au minimum de magnitude. Si `--epoch` n'est pas fourni,
-le script estime donc automatiquement `T0` a partir du maximum de lumiere du
-modele ajuste. Si `--epoch` est fourni, cette valeur est utilisee telle quelle.
+lumiere, c'est-a-dire au minimum de magnitude. Si `--epoch` est fourni, cette
+valeur est toujours prioritaire. Sinon, `T0` est estime automatiquement avec
+`--epoch-method`.
+
+Deux methodes automatiques sont disponibles :
+
+- `local-poly` : ajuste une parabole locale ponderee sur les mesures proches du
+  maximum de lumiere. C'est la methode par defaut.
+- `model` : prend le maximum de lumiere du modele Fourier ajuste.
 
 L'amplitude est calculee sur le modele ajuste :
 
@@ -126,7 +132,14 @@ Ordre de la serie de Fourier. Valeur par defaut : `4`.
 --epoch EPOCH
 ```
 
-Epoque `t0` en JD. Si absent, le maximum de lumiere du modele est utilise.
+Epoque `t0` en JD. Si fourni, cette valeur est prioritaire.
+
+```text
+--epoch-method {local-poly,model}
+```
+
+Methode automatique pour estimer `t0` si `--epoch` est absent. Valeur par
+defaut : `local-poly`.
 
 ```text
 --data DATA
@@ -242,7 +255,14 @@ Ordre Fourier utilise pour la recherche de periode. Valeur par defaut : `4`.
 --epoch EPOCH
 ```
 
-Epoque `t0` en JD. Si absent, le maximum de lumiere du modele est utilise.
+Epoque `t0` en JD. Si fourni, cette valeur est prioritaire.
+
+```text
+--epoch-method {local-poly,model}
+```
+
+Methode automatique pour estimer `t0` du fit final si `--epoch` est absent.
+Valeur par defaut : `local-poly`.
 
 ```text
 --data DATA
@@ -366,8 +386,14 @@ Ordre Fourier utilise pour tracer la courbe repliee finale. Valeur par defaut :
 --epoch EPOCH
 ```
 
-Epoque `t0` du fit Fourier final en JD. Si absent, le maximum de lumiere du
-modele est utilise.
+Epoque `t0` du fit Fourier final en JD. Si fourni, cette valeur est prioritaire.
+
+```text
+--epoch-method {local-poly,model}
+```
+
+Methode automatique pour estimer `t0` du fit final si `--epoch` est absent.
+Valeur par defaut : `local-poly`.
 
 ```text
 --data DATA

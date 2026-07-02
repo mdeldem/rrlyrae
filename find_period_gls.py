@@ -147,7 +147,13 @@ def main() -> None:
         "--epoch",
         type=float,
         default=None,
-        help="Epoque t0 du fit Fourier final en JD. Defaut: maximum de lumiere du modele.",
+        help="Epoque t0 du fit Fourier final en JD. Si fourni, cette valeur est prioritaire.",
+    )
+    parser.add_argument(
+        "--epoch-method",
+        choices=("local-poly", "model"),
+        default="local-poly",
+        help="Methode automatique pour t0 du fit final si --epoch est absent. Defaut: local-poly.",
     )
     parser.add_argument(
         "--data",
@@ -225,7 +231,15 @@ def main() -> None:
     periods = 1.0 / frequencies
     best_index = int(np.argmax(power))
     best_period = float(periods[best_index])
-    best_fit = fit_fourier_series(jd, mag, err, best_period, args.fit_order, args.epoch)
+    best_fit = fit_fourier_series(
+        jd,
+        mag,
+        err,
+        best_period,
+        args.fit_order,
+        args.epoch,
+        args.epoch_method,
+    )
 
     print_best_candidates(periods, power, args.top)
     print()
